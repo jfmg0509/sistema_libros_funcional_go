@@ -1,0 +1,25 @@
+# Binaries de Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Carpetas de build
+/bin/
+/pkg/
+
+# Archivos temporales
+*.log
+*.tmp
+*.swp
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# Configuración de IDEs
+.vscode/
+.idea/
+*.code-workspace
