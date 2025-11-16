@@ -37,3 +37,9 @@ internal/
     http/
 
 docs/
+go run ./cmd/api
+Autor
+Juan Francisco Morán
+
+Licencia
+pendiente de selección
