@@ -25,8 +25,8 @@ func main() {
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	log.Println("Servidor HTTP iniciado en http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	log.Println("Servidor HTTP iniciado en http://localhost:8081")
+	if err := http.ListenAndServe(":8081", mux); err != nil {
 		log.Fatalf("error al iniciar servidor: %v", err)
 	}
 }

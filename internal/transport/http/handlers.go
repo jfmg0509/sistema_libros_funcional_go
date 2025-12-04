@@ -9,13 +9,16 @@ import (
 	"github.com/jfmg0509/sistema_libros_funcional_go/internal/usecase"
 )
 
-// HTTPHandler agrupa los servicios que vamos a exponer por HTTP.
+/*
+HTTPHandler agrupa los servicios de la capa de negocio (usecase)
+que vamos a exponer mediante HTTP (API REST).
+*/
 type HTTPHandler struct {
 	userService *usecase.UserService
 	bookService *usecase.BookService
 }
 
-// NewHTTPHandler crea un nuevo handler HTTP.
+// NewHTTPHandler crea un nuevo HTTPHandler listo para registrar rutas.
 func NewHTTPHandler(userSvc *usecase.UserService, bookSvc *usecase.BookService) *HTTPHandler {
 	return &HTTPHandler{
 		userService: userSvc,
@@ -23,18 +26,24 @@ func NewHTTPHandler(userSvc *usecase.UserService, bookSvc *usecase.BookService) 
 	}
 }
 
-// RegisterRoutes registra las rutas del servidor HTTP.
+/*
+RegisterRoutes recibe un *http.ServeMux y registra todas
+las rutas/endpoints de nuestro servicio.
+*/
 func (h *HTTPHandler) RegisterRoutes(mux *nethttp.ServeMux) {
 	mux.HandleFunc("/health", h.handleHealth)
 	mux.HandleFunc("/users", h.handleUsers)
 	mux.HandleFunc("/books", h.handleBooks)
-	mux.HandleFunc("/books/search", h.handleBooksSearch)
+
+	// NUEVAS rutas:
+	mux.HandleFunc("/access", h.handleAccess)            // registrar acceso
+	mux.HandleFunc("/access/stats", h.handleAccessStats) // estadísticas
 }
 
 /*
-HANDLER: /health
-Método: GET
-Descripción: Endpoint simple para verificar si el servidor está vivo.
+==========================
+ENDPOINT /health
+==========================
 */
 func (h *HTTPHandler) handleHealth(w nethttp.ResponseWriter, r *nethttp.Request) {
 	writeJSON(w, nethttp.StatusOK, map[string]string{
@@ -43,10 +52,9 @@ func (h *HTTPHandler) handleHealth(w nethttp.ResponseWriter, r *nethttp.Request)
 }
 
 /*
-HANDLER: /users
-Métodos:
-  - GET  → lista usuarios
-  - POST → crea usuario
+==========================
+ENDPOINT /users
+==========================
 */
 func (h *HTTPHandler) handleUsers(w nethttp.ResponseWriter, r *nethttp.Request) {
 	switch r.Method {
@@ -66,7 +74,7 @@ func (h *HTTPHandler) handleUsers(w nethttp.ResponseWriter, r *nethttp.Request) 
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeError(w, nethttp.StatusBadRequest, "JSON inválido")
+			writeError(w, nethttp.StatusBadRequest, "JSON inválido en creación de usuario")
 			return
 		}
 
@@ -79,15 +87,14 @@ func (h *HTTPHandler) handleUsers(w nethttp.ResponseWriter, r *nethttp.Request) 
 		writeJSON(w, nethttp.StatusCreated, user)
 
 	default:
-		writeError(w, nethttp.StatusMethodNotAllowed, "método no permitido")
+		writeError(w, nethttp.StatusMethodNotAllowed, "método no permitido en /users")
 	}
 }
 
 /*
-HANDLER: /books
-Métodos:
-  - GET  → búsqueda simple por query params
-  - POST → registra un nuevo libro
+==========================
+ENDPOINT /books
+==========================
 */
 func (h *HTTPHandler) handleBooks(w nethttp.ResponseWriter, r *nethttp.Request) {
 	switch r.Method {
@@ -128,7 +135,7 @@ func (h *HTTPHandler) handleBooks(w nethttp.ResponseWriter, r *nethttp.Request) 
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			writeError(w, nethttp.StatusBadRequest, "JSON inválido")
+			writeError(w, nethttp.StatusBadRequest, "JSON inválido en creación de libro")
 			return
 		}
 
@@ -148,39 +155,91 @@ func (h *HTTPHandler) handleBooks(w nethttp.ResponseWriter, r *nethttp.Request) 
 		writeJSON(w, nethttp.StatusCreated, book)
 
 	default:
-		writeError(w, nethttp.StatusMethodNotAllowed, "método no permitido")
+		writeError(w, nethttp.StatusMethodNotAllowed, "método no permitido en /books")
 	}
 }
 
 /*
-HANDLER: /books/search
-Método: GET
-Descripción: ejemplo extra de búsqueda (puedes ampliarlo luego).
+==========================
+ENDPOINT /access  (POST)
+==========================
 */
-func (h *HTTPHandler) handleBooksSearch(w nethttp.ResponseWriter, r *nethttp.Request) {
+func (h *HTTPHandler) handleAccess(w nethttp.ResponseWriter, r *nethttp.Request) {
+	if r.Method != nethttp.MethodPost {
+		writeError(w, nethttp.StatusMethodNotAllowed, "método no permitido en /access")
+		return
+	}
+
+	var payload struct {
+		BookID     int64             `json:"book_id"`
+		UserID     int64             `json:"user_id"`
+		AccessType domain.AccessType `json:"access_type"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, nethttp.StatusBadRequest, "JSON inválido en registro de acceso")
+		return
+	}
+
+	if payload.BookID <= 0 {
+		writeError(w, nethttp.StatusBadRequest, "book_id debe ser mayor que cero")
+		return
+	}
+	if payload.UserID <= 0 {
+		writeError(w, nethttp.StatusBadRequest, "user_id debe ser mayor que cero")
+		return
+	}
+
+	err := h.bookService.RecordAccess(
+		domain.BookID(payload.BookID),
+		domain.UserID(payload.UserID),
+		payload.AccessType,
+	)
+	if err != nil {
+		writeError(w, nethttp.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, nethttp.StatusCreated, map[string]string{
+		"message": "acceso registrado correctamente",
+	})
+}
+
+/*
+==========================
+ENDPOINT /access/stats  (GET)
+==========================
+*/
+func (h *HTTPHandler) handleAccessStats(w nethttp.ResponseWriter, r *nethttp.Request) {
 	if r.Method != nethttp.MethodGet {
-		writeError(w, nethttp.StatusMethodNotAllowed, "método no permitido")
+		writeError(w, nethttp.StatusMethodNotAllowed, "método no permitido en /access/stats")
 		return
 	}
 
 	query := r.URL.Query()
-	filter := domain.BookFilter{
-		TitleContains:  query.Get("title"),
-		AuthorContains: query.Get("author"),
-		CategoryTI:     query.Get("category"),
+	bookIDStr := query.Get("book_id")
+	if bookIDStr == "" {
+		writeError(w, nethttp.StatusBadRequest, "parámetro book_id es obligatorio")
+		return
 	}
 
-	books, err := h.bookService.SearchBooks(filter)
+	bookIDInt, err := strconv.ParseInt(bookIDStr, 10, 64)
+	if err != nil || bookIDInt <= 0 {
+		writeError(w, nethttp.StatusBadRequest, "parámetro book_id debe ser un número válido mayor que cero")
+		return
+	}
+
+	stats, err := h.bookService.BuildAccessStatsByBook(domain.BookID(bookIDInt))
 	if err != nil {
 		writeError(w, nethttp.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, nethttp.StatusOK, books)
+	writeJSON(w, nethttp.StatusOK, stats)
 }
 
 /*
-   FUNCIONES DE APOYO PARA RESPUESTAS JSON
+   FUNCIONES AUXILIARES JSON
 */
 
 func writeJSON(w nethttp.ResponseWriter, status int, data any) {
