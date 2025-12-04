@@ -14,6 +14,7 @@ import (
    ======================
 */
 
+// InMemoryUserRepo guarda usuarios en memoria usando un MAP.
 type InMemoryUserRepo struct {
 	mu         sync.RWMutex
 	seq        domain.UserID
@@ -22,6 +23,7 @@ type InMemoryUserRepo struct {
 }
 
 // NewInMemoryUserRepo crea un repositorio de usuarios en memoria.
+// 👉 ESTA función es la que main.go está tratando de usar.
 func NewInMemoryUserRepo() *InMemoryUserRepo {
 	return &InMemoryUserRepo{
 		users:      make(map[domain.UserID]*domain.User),
@@ -29,6 +31,7 @@ func NewInMemoryUserRepo() *InMemoryUserRepo {
 	}
 }
 
+// nextID genera un nuevo ID incremental.
 func (r *InMemoryUserRepo) nextID() domain.UserID {
 	r.seq++
 	return r.seq
@@ -108,6 +111,7 @@ type InMemoryBookRepo struct {
 }
 
 // NewInMemoryBookRepo crea un repositorio de libros en memoria.
+// 👉 ESTA función también la usa main.go.
 func NewInMemoryBookRepo() *InMemoryBookRepo {
 	return &InMemoryBookRepo{
 		books: make(map[domain.BookID]*domain.Book),
@@ -163,22 +167,21 @@ func (r *InMemoryBookRepo) SearchByFilters(filter domain.BookFilter) ([]*domain.
 			continue
 		}
 
-		// Filtros por título, autor, categoría, años...
+		// Filtros por texto
 		if filter.TitleContains != "" &&
 			!strings.Contains(strings.ToLower(b.Title()), strings.ToLower(filter.TitleContains)) {
 			continue
 		}
-
 		if filter.AuthorContains != "" &&
 			!strings.Contains(strings.ToLower(b.Author()), strings.ToLower(filter.AuthorContains)) {
 			continue
 		}
-
 		if filter.CategoryTI != "" &&
 			!strings.EqualFold(b.CategoryTI(), filter.CategoryTI) {
 			continue
 		}
 
+		// Filtros por año
 		if filter.YearFrom > 0 && b.Year() < filter.YearFrom {
 			continue
 		}
@@ -186,7 +189,7 @@ func (r *InMemoryBookRepo) SearchByFilters(filter domain.BookFilter) ([]*domain.
 			continue
 		}
 
-		// Filtro por tags (si se enviaron).
+		// Filtros por tags
 		if len(filter.Tags) > 0 && !bookHasAllTags(b, filter.Tags) {
 			continue
 		}
@@ -208,7 +211,7 @@ func (r *InMemoryBookRepo) ListAll() ([]*domain.Book, error) {
 	return result, nil
 }
 
-// bookHasAllTags ayuda a verificar si un libro contiene TODOS los tags del filtro.
+// bookHasAllTags verifica si el libro tiene TODOS los tags del filtro.
 func bookHasAllTags(b *domain.Book, tags []string) bool {
 	tagSet := make(map[string]bool)
 	for _, t := range b.Tags() {
@@ -236,6 +239,7 @@ type InMemoryAccessLogRepo struct {
 }
 
 // NewInMemoryAccessLogRepo crea un repositorio en memoria para logs de acceso.
+// 👉 ESTA función es la tercera que main.go está llamando.
 func NewInMemoryAccessLogRepo() *InMemoryAccessLogRepo {
 	return &InMemoryAccessLogRepo{
 		events: make(map[domain.AccessEventID]*domain.AccessEvent),
