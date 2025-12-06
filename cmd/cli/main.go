@@ -37,7 +37,7 @@ type User struct {
 	Role  Role
 }
 
-// Book representa un libro electrónico.
+// Book representa un libro electrónico (sin tags, como pediste).
 type Book struct {
 	ID       int
 	Title    string
@@ -45,7 +45,6 @@ type Book struct {
 	Year     int
 	ISBN     string
 	Category string
-	Tags     []string
 }
 
 // AccessEvent representa un evento de acceso de un usuario a un libro.
@@ -88,20 +87,20 @@ func main() {
 		fmt.Println("0. Salir")
 		fmt.Print("Selecciona una opción: ")
 
-		// Leer opción
+		// Leer opción ingresada por el usuario
 		if !scanner.Scan() {
 			fmt.Println("No se pudo leer la opción. Saliendo...")
 			return
 		}
 		opcion := strings.TrimSpace(scanner.Text())
 
-		fmt.Println() // línea en blanco
+		fmt.Println() // línea en blanco para separar
 
 		switch opcion {
 		case "1":
 			registerUser(scanner)
 		case "2":
-			listUsers()
+			listUsers(scanner) // ahora recibe scanner para poder pausar
 		case "3":
 			registerBook(scanner)
 		case "4":
@@ -148,6 +147,12 @@ func registerUser(scanner *bufio.Scanner) {
 	}
 	email := strings.TrimSpace(scanner.Text())
 
+	// 🔒 Validación básica: el email debe contener '@'.
+	if !strings.Contains(email, "@") {
+		fmt.Println("Email inválido. Debe contener '@'.")
+		return
+	}
+
 	fmt.Print("Rol (ADMIN/READER): ")
 	if !scanner.Scan() {
 		fmt.Println("Error al leer el rol.")
@@ -166,14 +171,19 @@ func registerUser(scanner *bufio.Scanner) {
 		return
 	}
 
-	// Validación simple: que no exista email duplicado.
+	// 🔒 Validación: no permitir usuarios repetidos por nombre o email.
 	for _, u := range users {
 		if strings.EqualFold(u.Email, email) {
 			fmt.Println("Ya existe un usuario con ese email.")
 			return
 		}
+		if strings.EqualFold(u.Name, name) {
+			fmt.Println("Ya existe un usuario con ese nombre.")
+			return
+		}
 	}
 
+	// Crear el usuario y agregarlo al slice en memoria.
 	user := User{
 		ID:    newID,
 		Name:  name,
@@ -185,19 +195,22 @@ func registerUser(scanner *bufio.Scanner) {
 	fmt.Println("Usuario registrado correctamente con ID:", user.ID)
 }
 
-// listUsers imprime todos los usuarios registrados.
-func listUsers() {
+// listUsers imprime todos los usuarios y espera ENTER para volver al menú.
+func listUsers(scanner *bufio.Scanner) {
 	fmt.Println("=== Listado de usuarios ===")
 
 	if len(users) == 0 {
 		fmt.Println("No hay usuarios registrados.")
-		return
+	} else {
+		for _, u := range users {
+			fmt.Printf("ID: %d | Nombre: %s | Email: %s | Rol: %s\n",
+				u.ID, u.Name, u.Email, u.Role)
+		}
 	}
 
-	for _, u := range users {
-		fmt.Printf("ID: %d | Nombre: %s | Email: %s | Rol: %s\n",
-			u.ID, u.Name, u.Email, u.Role)
-	}
+	// Pausa para que el usuario pueda leer antes de volver al menú.
+	fmt.Print("\nPresiona ENTER para volver al menú...")
+	scanner.Scan()
 }
 
 // ------------------------------------------------------------
@@ -250,23 +263,7 @@ func registerBook(scanner *bufio.Scanner) {
 	}
 	category := strings.TrimSpace(scanner.Text())
 
-	fmt.Print("Tags (separadas por coma, ej: iso27001,redes,criptografia): ")
-	if !scanner.Scan() {
-		fmt.Println("Error al leer los tags.")
-		return
-	}
-	tagsInput := strings.TrimSpace(scanner.Text())
-	var tags []string
-	if tagsInput != "" {
-		rawTags := strings.Split(tagsInput, ",")
-		for _, t := range rawTags {
-			tag := strings.TrimSpace(t)
-			if tag != "" {
-				tags = append(tags, tag)
-			}
-		}
-	}
-
+	// Crear el libro (sin tags, como acordamos).
 	book := Book{
 		ID:       newID,
 		Title:    title,
@@ -274,7 +271,6 @@ func registerBook(scanner *bufio.Scanner) {
 		Year:     year,
 		ISBN:     isbn,
 		Category: category,
-		Tags:     tags,
 	}
 
 	books = append(books, book)
@@ -293,9 +289,6 @@ func listBooks() {
 	for _, b := range books {
 		fmt.Printf("ID: %d | Título: %s | Autor: %s | Año: %d | ISBN: %s | Categoría: %s\n",
 			b.ID, b.Title, b.Author, b.Year, b.ISBN, b.Category)
-		if len(b.Tags) > 0 {
-			fmt.Println("   Tags:", strings.Join(b.Tags, ", "))
-		}
 	}
 }
 
@@ -399,6 +392,7 @@ func registerAccess(scanner *bufio.Scanner) {
 		return
 	}
 
+	// ID del evento de acceso se genera automáticamente.
 	newID := len(accessEvents) + 1
 
 	event := AccessEvent{
@@ -436,7 +430,7 @@ func showAccessStats(scanner *bufio.Scanner) {
 		return
 	}
 
-	// Construimos un mapa AccessType -> cantidad
+	// Construimos un mapa AccessType -> cantidad de accesos.
 	stats := make(map[AccessType]int)
 
 	for _, e := range accessEvents {
