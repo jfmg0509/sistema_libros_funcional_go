@@ -10,15 +10,23 @@ import (
 )
 
 /*
-HTTPHandler agrupa los servicios de la capa de negocio (usecase)
-que vamos a exponer mediante HTTP (API REST).
+   ==========================================================
+   HTTPHandler
+   ==========================================================
+
+   Esta estructura se encarga de conectar la capa HTTP (peticiones)
+   con la capa de negocio (usecase).
+
+   - No guarda datos.
+   - Solo recibe requests, llama a servicios, y responde JSON.
 */
+
 type HTTPHandler struct {
 	userService *usecase.UserService
 	bookService *usecase.BookService
 }
 
-// NewHTTPHandler crea un nuevo HTTPHandler listo para registrar rutas.
+// NewHTTPHandler es el CONSTRUCTOR del handler HTTP.
 func NewHTTPHandler(userSvc *usecase.UserService, bookSvc *usecase.BookService) *HTTPHandler {
 	return &HTTPHandler{
 		userService: userSvc,
@@ -28,22 +36,32 @@ func NewHTTPHandler(userSvc *usecase.UserService, bookSvc *usecase.BookService) 
 
 /*
 RegisterRoutes recibe un *http.ServeMux y registra todas
-las rutas/endpoints de nuestro servicio.
+las rutas que soporta nuestra API.
+
+Aquí definimos:
+- /health
+- /users
+- /books
+- /access
+- /access/stats
 */
 func (h *HTTPHandler) RegisterRoutes(mux *nethttp.ServeMux) {
 	mux.HandleFunc("/health", h.handleHealth)
 	mux.HandleFunc("/users", h.handleUsers)
 	mux.HandleFunc("/books", h.handleBooks)
-
-	// NUEVAS rutas:
-	mux.HandleFunc("/access", h.handleAccess)            // registrar acceso
-	mux.HandleFunc("/access/stats", h.handleAccessStats) // estadísticas
+	mux.HandleFunc("/access", h.handleAccess)
+	mux.HandleFunc("/access/stats", h.handleAccessStats)
 }
 
 /*
-==========================
+==========================================================
 ENDPOINT /health
-==========================
+==========================================================
+
+Método: GET
+
+Sirve para verificar que el servidor está vivo.
+Responde: {"status": "ok"}
 */
 func (h *HTTPHandler) handleHealth(w nethttp.ResponseWriter, r *nethttp.Request) {
 	writeJSON(w, nethttp.StatusOK, map[string]string{
@@ -52,13 +70,26 @@ func (h *HTTPHandler) handleHealth(w nethttp.ResponseWriter, r *nethttp.Request)
 }
 
 /*
-==========================
+==========================================================
 ENDPOINT /users
-==========================
+==========================================================
+
+Métodos soportados:
+- GET  /users  → Lista todos los usuarios
+- POST /users  → Crea un nuevo usuario
+
+Formato JSON para crear usuario:
+
+	{
+	  "name": "Marleen",
+	  "email": "marleen@example.com",
+	  "role": "ADMIN"
+	}
 */
 func (h *HTTPHandler) handleUsers(w nethttp.ResponseWriter, r *nethttp.Request) {
 	switch r.Method {
 	case nethttp.MethodGet:
+		// Obtener lista de usuarios desde la capa de negocio.
 		users, err := h.userService.ListUsers()
 		if err != nil {
 			writeError(w, nethttp.StatusInternalServerError, err.Error())
@@ -67,23 +98,27 @@ func (h *HTTPHandler) handleUsers(w nethttp.ResponseWriter, r *nethttp.Request) 
 		writeJSON(w, nethttp.StatusOK, users)
 
 	case nethttp.MethodPost:
+		// Estructura auxiliar para leer el JSON de entrada.
 		var payload struct {
 			Name  string      `json:"name"`
 			Email string      `json:"email"`
 			Role  domain.Role `json:"role"`
 		}
 
+		// Decodificar el JSON del body en la estructura payload.
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			writeError(w, nethttp.StatusBadRequest, "JSON inválido en creación de usuario")
 			return
 		}
 
+		// Llamar al caso de uso para registrar el usuario.
 		user, err := h.userService.RegisterUser(payload.Name, payload.Email, payload.Role)
 		if err != nil {
 			writeError(w, nethttp.StatusBadRequest, err.Error())
 			return
 		}
 
+		// Responder con el usuario creado (aunque por encapsulación se ve como {} en JSON).
 		writeJSON(w, nethttp.StatusCreated, user)
 
 	default:
@@ -92,13 +127,29 @@ func (h *HTTPHandler) handleUsers(w nethttp.ResponseWriter, r *nethttp.Request) 
 }
 
 /*
-==========================
+==========================================================
 ENDPOINT /books
-==========================
+==========================================================
+
+Métodos soportados:
+- GET  /books         → Lista o busca libros por filtros.
+- POST /books         → Crea un nuevo libro.
+
+Ejemplo JSON para crear libro:
+
+	{
+	  "title": "Seguridad Informática",
+	  "author": "Baca Urbina",
+	  "year": 2016,
+	  "isbn": "123-456",
+	  "category_ti": "Seguridad",
+	  "tags": ["seguridad","ciberseguridad"]
+	}
 */
 func (h *HTTPHandler) handleBooks(w nethttp.ResponseWriter, r *nethttp.Request) {
 	switch r.Method {
 	case nethttp.MethodGet:
+		// Leer parámetros de consulta (query params).
 		query := r.URL.Query()
 		filter := domain.BookFilter{
 			TitleContains:  query.Get("title"),
@@ -106,6 +157,7 @@ func (h *HTTPHandler) handleBooks(w nethttp.ResponseWriter, r *nethttp.Request) 
 			CategoryTI:     query.Get("category"),
 		}
 
+		// Convertir year_from y year_to si vienen en la URL.
 		if yearFromStr := query.Get("year_from"); yearFromStr != "" {
 			if yearFrom, err := strconv.Atoi(yearFromStr); err == nil {
 				filter.YearFrom = yearFrom
@@ -125,6 +177,7 @@ func (h *HTTPHandler) handleBooks(w nethttp.ResponseWriter, r *nethttp.Request) 
 		writeJSON(w, nethttp.StatusOK, books)
 
 	case nethttp.MethodPost:
+		// Estructura auxiliar para el JSON de entrada.
 		var payload struct {
 			Title      string   `json:"title"`
 			Author     string   `json:"author"`
@@ -160,9 +213,20 @@ func (h *HTTPHandler) handleBooks(w nethttp.ResponseWriter, r *nethttp.Request) 
 }
 
 /*
-==========================
-ENDPOINT /access  (POST)
-==========================
+==========================================================
+ENDPOINT /access
+==========================================================
+
+Método soportado:
+- POST /access   → registra un acceso de un usuario a un libro.
+
+Ejemplo JSON:
+
+	{
+	  "book_id": 1,
+	  "user_id": 1,
+	  "access_type": "LECTURA"
+	}
 */
 func (h *HTTPHandler) handleAccess(w nethttp.ResponseWriter, r *nethttp.Request) {
 	if r.Method != nethttp.MethodPost {
@@ -190,6 +254,7 @@ func (h *HTTPHandler) handleAccess(w nethttp.ResponseWriter, r *nethttp.Request)
 		return
 	}
 
+	// Llamar a la lógica de negocio para registrar el acceso.
 	err := h.bookService.RecordAccess(
 		domain.BookID(payload.BookID),
 		domain.UserID(payload.UserID),
@@ -206,9 +271,20 @@ func (h *HTTPHandler) handleAccess(w nethttp.ResponseWriter, r *nethttp.Request)
 }
 
 /*
-==========================
-ENDPOINT /access/stats  (GET)
-==========================
+==========================================================
+ENDPOINT /access/stats
+==========================================================
+
+Método soportado:
+- GET /access/stats?book_id=1  → devuelve estadísticas de accesos
+
+Ejemplo de respuesta:
+
+	{
+	  "LECTURA":  3,
+	  "APERTURA": 5,
+	  "DESCARGA": 1
+	}
 */
 func (h *HTTPHandler) handleAccessStats(w nethttp.ResponseWriter, r *nethttp.Request) {
 	if r.Method != nethttp.MethodGet {
@@ -239,15 +315,19 @@ func (h *HTTPHandler) handleAccessStats(w nethttp.ResponseWriter, r *nethttp.Req
 }
 
 /*
-   FUNCIONES AUXILIARES JSON
+   ==========================================================
+   Funciones auxiliares para respuestas JSON
+   ==========================================================
 */
 
+// writeJSON escribe una respuesta JSON con el código de estado indicado.
 func writeJSON(w nethttp.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }
 
+// writeError simplifica el envío de errores en formato JSON.
 func writeError(w nethttp.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{
 		"error": msg,

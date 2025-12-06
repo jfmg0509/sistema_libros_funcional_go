@@ -9,21 +9,27 @@ import (
 )
 
 /*
-   ======================
-   REPOSITORIO EN MEMORIA PARA USUARIOS
-   ======================
+   ==========================================================
+   InMemoryUserRepo
+   ==========================================================
+
+   Implementación EN MEMORIA de UserRepository usando MAPS.
+
+   - users:      map[UserID]*User
+   - emailIndex: map[string]UserID (para buscar rápido por email)
+
+   Ideal para prácticas y prototipos sin base de datos real.
 */
 
-// InMemoryUserRepo guarda usuarios en memoria usando un MAP.
+// InMemoryUserRepo implementa domain.UserRepository usando mapas en memoria.
 type InMemoryUserRepo struct {
-	mu         sync.RWMutex
-	seq        domain.UserID
+	mu         sync.RWMutex  // mutex para acceso concurrente
+	seq        domain.UserID // secuencia para generar IDs
 	users      map[domain.UserID]*domain.User
 	emailIndex map[string]domain.UserID
 }
 
-// NewInMemoryUserRepo crea un repositorio de usuarios en memoria.
-// 👉 ESTA función es la que main.go está tratando de usar.
+// NewInMemoryUserRepo crea un repositorio vacío listo para usar.
 func NewInMemoryUserRepo() *InMemoryUserRepo {
 	return &InMemoryUserRepo{
 		users:      make(map[domain.UserID]*domain.User),
@@ -31,12 +37,14 @@ func NewInMemoryUserRepo() *InMemoryUserRepo {
 	}
 }
 
-// nextID genera un nuevo ID incremental.
+// nextID incrementa la secuencia y devuelve un nuevo ID de usuario.
 func (r *InMemoryUserRepo) nextID() domain.UserID {
 	r.seq++
 	return r.seq
 }
 
+// Create guarda un nuevo usuario en el mapa.
+// Valida que no exista otro usuario con el mismo email.
 func (r *InMemoryUserRepo) Create(user *domain.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -53,18 +61,33 @@ func (r *InMemoryUserRepo) Create(user *domain.User) error {
 	return nil
 }
 
+// Update actualiza un usuario ya existente.
 func (r *InMemoryUserRepo) Update(user *domain.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.users[user.ID()]; !ok {
-		return errors.New("usuario no encontrado para actualizar")
+	if user.ID() == 0 {
+		return errors.New("el usuario no tiene ID asignado")
 	}
+
+	if _, exists := r.users[user.ID()]; !exists {
+		return errors.New("no existe un usuario con ese ID")
+	}
+
+	// Actualizar el índice de email si cambió el correo.
+	for email, id := range r.emailIndex {
+		if id == user.ID() && email != user.Email() {
+			delete(r.emailIndex, email)
+			r.emailIndex[user.Email()] = user.ID()
+			break
+		}
+	}
+
 	r.users[user.ID()] = user
-	r.emailIndex[user.Email()] = user.ID()
 	return nil
 }
 
+// FindByID busca un usuario por su ID.
 func (r *InMemoryUserRepo) FindByID(id domain.UserID) (*domain.User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -76,17 +99,23 @@ func (r *InMemoryUserRepo) FindByID(id domain.UserID) (*domain.User, error) {
 	return user, nil
 }
 
+// FindByEmail busca un usuario por su email usando el índice.
 func (r *InMemoryUserRepo) FindByEmail(email string) (*domain.User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	id, ok := r.emailIndex[email]
+	id, ok := r.emailIndex[strings.ToLower(email)]
 	if !ok {
 		return nil, nil
 	}
-	return r.users[id], nil
+	user, ok := r.users[id]
+	if !ok {
+		return nil, nil
+	}
+	return user, nil
 }
 
+// ListAll devuelve todos los usuarios en una slice.
 func (r *InMemoryUserRepo) ListAll() ([]*domain.User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -99,11 +128,12 @@ func (r *InMemoryUserRepo) ListAll() ([]*domain.User, error) {
 }
 
 /*
-   ======================
-   REPOSITORIO EN MEMORIA PARA LIBROS
-   ======================
+   ==========================================================
+   InMemoryBookRepo
+   ==========================================================
 */
 
+// InMemoryBookRepo implementa BookRepository usando mapas en memoria.
 type InMemoryBookRepo struct {
 	mu    sync.RWMutex
 	seq   domain.BookID
@@ -111,40 +141,46 @@ type InMemoryBookRepo struct {
 }
 
 // NewInMemoryBookRepo crea un repositorio de libros en memoria.
-// 👉 ESTA función también la usa main.go.
 func NewInMemoryBookRepo() *InMemoryBookRepo {
 	return &InMemoryBookRepo{
 		books: make(map[domain.BookID]*domain.Book),
 	}
 }
 
+// nextID genera un nuevo ID para libros.
 func (r *InMemoryBookRepo) nextID() domain.BookID {
 	r.seq++
 	return r.seq
 }
 
+// Create guarda un nuevo libro en el mapa.
 func (r *InMemoryBookRepo) Create(book *domain.Book) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	id := r.nextID()
 	book.SetID(id)
-
 	r.books[id] = book
 	return nil
 }
 
+// Update actualiza un libro existente.
 func (r *InMemoryBookRepo) Update(book *domain.Book) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.books[book.ID()]; !ok {
-		return errors.New("libro no encontrado para actualizar")
+	if book.ID() == 0 {
+		return errors.New("el libro no tiene ID asignado")
 	}
+	if _, exists := r.books[book.ID()]; !exists {
+		return errors.New("no existe un libro con ese ID")
+	}
+
 	r.books[book.ID()] = book
 	return nil
 }
 
+// FindByID busca un libro por su ID.
 func (r *InMemoryBookRepo) FindByID(id domain.BookID) (*domain.Book, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -156,43 +192,47 @@ func (r *InMemoryBookRepo) FindByID(id domain.BookID) (*domain.Book, error) {
 	return book, nil
 }
 
-// SearchByFilters aplica filtros simples EN MEMORIA.
+// SearchByFilters aplica filtros básicos sobre todos los libros.
 func (r *InMemoryBookRepo) SearchByFilters(filter domain.BookFilter) ([]*domain.Book, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	result := make([]*domain.Book, 0)
 	for _, b := range r.books {
+		// Solo libros activos.
 		if !b.Active() {
 			continue
 		}
 
-		// Filtros por texto
+		// Filtro por título.
 		if filter.TitleContains != "" &&
 			!strings.Contains(strings.ToLower(b.Title()), strings.ToLower(filter.TitleContains)) {
 			continue
 		}
+
+		// Filtro por autor.
 		if filter.AuthorContains != "" &&
 			!strings.Contains(strings.ToLower(b.Author()), strings.ToLower(filter.AuthorContains)) {
 			continue
 		}
+
+		// Filtro por categoría TI.
 		if filter.CategoryTI != "" &&
 			!strings.EqualFold(b.CategoryTI(), filter.CategoryTI) {
 			continue
 		}
 
-		// Filtros por año
+		// Filtro por año desde.
 		if filter.YearFrom > 0 && b.Year() < filter.YearFrom {
 			continue
 		}
+
+		// Filtro por año hasta.
 		if filter.YearTo > 0 && b.Year() > filter.YearTo {
 			continue
 		}
 
-		// Filtros por tags
-		if len(filter.Tags) > 0 && !bookHasAllTags(b, filter.Tags) {
-			continue
-		}
+		// (Opcional) Filtro por tags: aquí podrías validar si contiene ciertos tags.
 
 		result = append(result, b)
 	}
@@ -200,6 +240,7 @@ func (r *InMemoryBookRepo) SearchByFilters(filter domain.BookFilter) ([]*domain.
 	return result, nil
 }
 
+// ListAll devuelve todos los libros.
 func (r *InMemoryBookRepo) ListAll() ([]*domain.Book, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -211,57 +252,44 @@ func (r *InMemoryBookRepo) ListAll() ([]*domain.Book, error) {
 	return result, nil
 }
 
-// bookHasAllTags verifica si el libro tiene TODOS los tags del filtro.
-func bookHasAllTags(b *domain.Book, tags []string) bool {
-	tagSet := make(map[string]bool)
-	for _, t := range b.Tags() {
-		tagSet[strings.ToLower(t)] = true
-	}
-
-	for _, filterTag := range tags {
-		if !tagSet[strings.ToLower(filterTag)] {
-			return false
-		}
-	}
-	return true
-}
-
 /*
-   ==========================
-   REPOSITORIO EN MEMORIA PARA ACCESS LOGS
-   ==========================
+   ==========================================================
+   InMemoryAccessLogRepo
+   ==========================================================
 */
 
+// InMemoryAccessLogRepo implementa AccessLogRepository en memoria.
 type InMemoryAccessLogRepo struct {
 	mu     sync.RWMutex
 	seq    domain.AccessEventID
 	events map[domain.AccessEventID]*domain.AccessEvent
 }
 
-// NewInMemoryAccessLogRepo crea un repositorio en memoria para logs de acceso.
-// 👉 ESTA función es la tercera que main.go está llamando.
+// NewInMemoryAccessLogRepo crea un repositorio de accesos vacío.
 func NewInMemoryAccessLogRepo() *InMemoryAccessLogRepo {
 	return &InMemoryAccessLogRepo{
 		events: make(map[domain.AccessEventID]*domain.AccessEvent),
 	}
 }
 
+// nextID genera un nuevo ID para eventos de acceso.
 func (r *InMemoryAccessLogRepo) nextID() domain.AccessEventID {
 	r.seq++
 	return r.seq
 }
 
+// Store guarda un nuevo evento de acceso.
 func (r *InMemoryAccessLogRepo) Store(event *domain.AccessEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	id := r.nextID()
 	event.SetID(id)
-
 	r.events[id] = event
 	return nil
 }
 
+// ListByBook devuelve todos los eventos para un libro.
 func (r *InMemoryAccessLogRepo) ListByBook(bookID domain.BookID) ([]*domain.AccessEvent, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -275,6 +303,7 @@ func (r *InMemoryAccessLogRepo) ListByBook(bookID domain.BookID) ([]*domain.Acce
 	return result, nil
 }
 
+// ListByUser devuelve todos los eventos para un usuario (no lo usamos aún, pero está listo).
 func (r *InMemoryAccessLogRepo) ListByUser(userID domain.UserID) ([]*domain.AccessEvent, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

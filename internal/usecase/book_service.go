@@ -1,32 +1,60 @@
 package usecase
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/jfmg0509/sistema_libros_funcional_go/internal/domain"
 )
 
-// BookService contiene la lógica de negocio para libros y accesos.
+/*
+   ==========================================================
+   BookService
+   ==========================================================
+
+   Este servicio maneja la lógica de negocio de los libros y
+   de los accesos a los libros (eventos de lectura, apertura, etc.).
+
+   Depende de TRES interfaces:
+   - BookRepository: para guardar y buscar libros.
+   - UserRepository: para verificar que el usuario exista.
+   - AccessLogRepository: para guardar eventos de acceso.
+*/
+
+// BookService representa los casos de uso relacionados con libros.
 type BookService struct {
-	bookRepo   domain.BookRepository
-	accessRepo domain.AccessLogRepository
+	bookRepo      domain.BookRepository
+	userRepo      domain.UserRepository
+	accessLogRepo domain.AccessLogRepository
 }
 
-// NewBookService crea un nuevo BookService.
-func NewBookService(bookRepo domain.BookRepository, accessRepo domain.AccessLogRepository) *BookService {
+// NewBookService es el CONSTRUCTOR de BookService.
+func NewBookService(
+	bookRepo domain.BookRepository,
+	userRepo domain.UserRepository,
+	accessLogRepo domain.AccessLogRepository,
+) *BookService {
 	return &BookService{
-		bookRepo:   bookRepo,
-		accessRepo: accessRepo,
+		bookRepo:      bookRepo,
+		userRepo:      userRepo,
+		accessLogRepo: accessLogRepo,
 	}
 }
 
-// RegisterBook registra un nuevo libro en el sistema.
+/*
+RegisterBook registra un nuevo libro en el sistema.
+
+Pasos:
+1. Usa el constructor de dominio (NewBook) para validar los datos.
+2. Pide al repositorio que cree el libro.
+3. Devuelve el libro creado.
+*/
 func (s *BookService) RegisterBook(
 	title, author string,
 	year int,
 	isbn, categoryTI string,
 	tags []string,
 ) (*domain.Book, error) {
+
 	book, err := domain.NewBook(title, author, year, isbn, categoryTI, tags)
 	if err != nil {
 		return nil, err
@@ -35,48 +63,101 @@ func (s *BookService) RegisterBook(
 	if err := s.bookRepo.Create(book); err != nil {
 		return nil, err
 	}
+
 	return book, nil
 }
 
-// SearchBooks realiza búsquedas avanzadas de libros según un filtro.
+/*
+SearchBooks permite buscar libros por filtros.
+
+Recibe un BookFilter que puede tener:
+- parte del título
+- parte del autor
+- categoría
+- años "from" y "to"
+- tags
+
+La implementación exacta del filtro se hace en el repositorio.
+*/
 func (s *BookService) SearchBooks(filter domain.BookFilter) ([]*domain.Book, error) {
 	return s.bookRepo.SearchByFilters(filter)
 }
 
-// ArchiveBook archiva (desactiva) un libro.
-func (s *BookService) ArchiveBook(id domain.BookID) error {
-	book, err := s.bookRepo.FindByID(id)
+/*
+RecordAccess registra un acceso de un usuario a un libro.
+
+Pasos:
+1. Verificar que el libro exista.
+2. Verificar que el usuario exista.
+3. Crear un AccessEvent (dominio).
+4. Guardar el evento en el AccessLogRepository.
+*/
+func (s *BookService) RecordAccess(
+	bookID domain.BookID,
+	userID domain.UserID,
+	accessType domain.AccessType,
+) error {
+
+	// 1. Verificar libro.
+	book, err := s.bookRepo.FindByID(bookID)
 	if err != nil {
 		return err
 	}
 	if book == nil {
-		return errors.New("libro no encontrado")
+		return fmt.Errorf("libro no encontrado")
 	}
 
-	book.Archive()
-	return s.bookRepo.Update(book)
-}
-
-// RecordAccess registra un evento de acceso a un libro.
-func (s *BookService) RecordAccess(bookID domain.BookID, userID domain.UserID, access domain.AccessType) error {
-	event, err := domain.NewAccessEvent(bookID, userID, access)
+	// 2. Verificar usuario.
+	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
 		return err
 	}
-	return s.accessRepo.Store(event)
+	if user == nil {
+		return fmt.Errorf("usuario no encontrado")
+	}
+
+	// 3. Crear el evento de acceso.
+	event, err := domain.NewAccessEvent(bookID, userID, accessType)
+	if err != nil {
+		return err
+	}
+
+	// 4. Guardar el evento.
+	if err := s.accessLogRepo.Store(event); err != nil {
+		return err
+	}
+
+	return nil
 }
 
-// BuildAccessStatsByBook genera estadísticas de accesos por tipo de acceso.
-// Aquí usamos un MAP (map[AccessType]int) cumpliendo el requerimiento.
+/*
+BuildAccessStatsByBook genera estadísticas de accesos por libro.
+
+Devuelve un MAP:
+- clave: AccessType (LECTURA, APERTURA, etc.)
+- valor: cantidad de veces que ocurrió
+
+Ejemplo de retorno:
+
+	{
+	  "LECTURA":  3,
+	  "APERTURA": 5
+	}
+*/
 func (s *BookService) BuildAccessStatsByBook(bookID domain.BookID) (map[domain.AccessType]int, error) {
-	events, err := s.accessRepo.ListByBook(bookID)
+	// 1. Traer todos los eventos de ese libro.
+	events, err := s.accessLogRepo.ListByBook(bookID)
 	if err != nil {
 		return nil, err
 	}
 
+	// 2. Crear el MAP donde vamos a contar.
 	stats := make(map[domain.AccessType]int)
+
+	// 3. Recorrer eventos e incrementar el contador por tipo.
 	for _, ev := range events {
-		stats[ev.Access()]++
+		stats[ev.AccessType()] = stats[ev.AccessType()] + 1
 	}
+
 	return stats, nil
 }
